@@ -23,8 +23,8 @@
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven.compiler.target>21</maven.compiler.target>
-    <maven.compiler.source>21</maven.compiler.source>
+    <maven.compiler.target>20</maven.compiler.target>
+    <maven.compiler.source>20</maven.compiler.source>
     <junit.version>5.11.0-M2</junit.version>
     
     <!-- Propriétés SonarQube -->
@@ -34,7 +34,7 @@
     <sonar.sources>src/main/java</sonar.sources>
     <sonar.tests>src/test/java</sonar.tests>
     <sonar.java.binaries>target/classes</sonar.java.binaries>
-  </properties>
+</properties>
 
   <dependencies>
     <dependency>
@@ -146,14 +146,13 @@
     <plugins>
       <!-- Plugin de compilation -->
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-compiler-plugin</artifactId>
-        <configuration>
-          <source>21</source>
-          <target>21</target>
-          <compilerArgs>--enable-preview</compilerArgs>
-        </configuration>
-      </plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-compiler-plugin</artifactId>
+    <configuration>
+        <source>20</source>
+        <target>20</target>
+    </configuration>
+</plugin>
 
       <!-- Plugin WAR -->
       <plugin>
