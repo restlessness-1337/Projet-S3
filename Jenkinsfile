@@ -71,31 +71,27 @@ pipeline {
             }
         }
 
-        stage('🐳 Build & Push Docker Image with Jib') {
-            steps {
-                echo '=========================================='
-                echo 'Stage 5: Building and pushing Docker image using Jib...'
-                echo '=========================================='
+        stage('🐳 Docker Build & Push') {
+  steps {
+    echo '=========================================='
+    echo 'Stage 5: Building and pushing Docker image...'
+    echo '=========================================='
 
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials',
-                                                  usernameVariable: 'DH_USER',
-                                                  passwordVariable: 'DH_PASS')]) {
-                    sh """
-                        mvn -B com.google.cloud.tools:jib-maven-plugin:3.4.1:build \
-                          -Dimage=${DOCKER_IMAGE}:${BUILD_NUMBER} \
-                          -Djib.to.tags=latest,${BUILD_NUMBER} \
-                          -Djib.to.auth.username=${DH_USER} \
-                          -Djib.to.auth.password=${DH_PASS} \
-                          -Djib.from.image=tomcat:10.1-jdk17 \
-                          -Djib.containerizingMode=packaged \
-                          -Djib.container.ports=8080
-                    """
-                }
-                echo "✅ Image pushed: ${DOCKER_IMAGE}:${BUILD_NUMBER} and :latest"
-                echo "🔗 Docker Hub: https://hub.docker.com/r/${DOCKER_IMAGE}"
-            }
-        }
+    script {
+      // registry-1.docker.io = endpoint officiel de Docker Hub
+      docker.withRegistry('https://registry-1.docker.io/', 'dockerhub-credentials') {
+        // Construit l’image à partir du Dockerfile à la racine
+        def app = docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}")
+        // Push du tag de build et du tag latest
+        app.push()
+        app.push('latest')
+      }
     }
+
+    echo "✅ Docker image pushed: ${DOCKER_IMAGE}:${BUILD_NUMBER} & :latest"
+    echo "🔗 https://hub.docker.com/r/${DOCKER_IMAGE}"
+  }
+}
 
     post {
         always {
