@@ -4,78 +4,95 @@ pipeline {
     tools {
         maven 'Maven-3.9.11'
     }
-
+    
     environment {
         DOCKER_IMAGE = 'restlessness/projet-s3'
         DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
         KUBE_NAMESPACE = 'default'
     }
-
+    
     stages {
         stage('🔍 Checkout Code') {
             steps {
                 echo '=========================================='
                 echo 'Stage 1: Cloning repository from GitHub...'
                 echo '=========================================='
-                echo 'Repository cloned successfully.'
-                echo 'Branch: main | Commit: 7f3a1cd'
+                checkout scm
+                
+                script {
+                    def gitCommit = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
+                    echo "Git Commit: ${gitCommit}"
+                }
             }
         }
-
+        
         stage('🏗️ Build Project') {
             steps {
                 echo '=========================================='
                 echo 'Stage 2: Compiling the application...'
                 echo '=========================================='
-                echo 'Maven Version: Apache Maven 3.9.11'
-                echo 'Java Version: OpenJDK 17'
-                echo 'Building project...'
-                echo '[INFO] BUILD SUCCESS'
+                
+                sh '''
+                    echo "Maven Version:"
+                    mvn --version
+                    
+                    echo "Starting compilation..."
+                    mvn clean compile
+                '''
             }
         }
-
+        
         stage('🧪 Unit Tests') {
             steps {
                 echo '=========================================='
                 echo 'Stage 3: Running unit tests...'
                 echo '=========================================='
-                echo '[INFO] Running tests...'
-                echo '[INFO] Tests run: 42, Failures: 0, Errors: 0, Skipped: 0'
-                echo '[INFO] BUILD SUCCESS'
+                sh 'mvn test || true'
             }
             post {
                 always {
-                    echo "Test results published!"
+                    junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
+                    echo "🧾 Test results published!"
                 }
             }
         }
-
+        
         stage('📦 Package Application') {
             steps {
                 echo '=========================================='
                 echo 'Stage 4: Packaging the application...'
                 echo '=========================================='
-                echo '[INFO] Building WAR file...'
-                echo '[INFO] target/Projet_S3.war created (15 MB)'
-                echo "✅ WAR file created successfully."
+                
+                sh 'mvn package -DskipTests'
+                
+                script {
+                    sh 'ls -lah target/*.war'
+                    echo "✅ WAR file created: target/Projet_S3.war"
+                }
             }
             post {
                 success {
-                    echo "✅ Artifact archived successfully!"
+                    archiveArtifacts artifacts: 'target/*.war', fingerprint: true
+                    echo "📦 Artifact archived successfully!"
                 }
             }
         }
-
+        
         stage('🐳 Docker Build & Push') {
             steps {
                 echo '=========================================='
                 echo 'Stage 5: Building & pushing Docker image...'
                 echo '=========================================='
-                echo '[Docker] Building image restlessness/projet-s3:12'
-                echo '[Docker] Successfully built image.'
-                echo '[Docker] Pushing image to Docker Hub...'
-                echo '[Docker] Image pushed successfully.'
-                echo "✅ Docker image pushed: ${DOCKER_IMAGE}:12 & :latest"
+                
+                script {
+                    docker.withRegistry('https://registry-1.docker.io/', 'dockerhub-credentials') {
+                        def app = docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}")
+                        app.push()
+                        app.push('latest')
+                    }
+                }
+                
+                echo "✅ Docker image pushed: ${DOCKER_IMAGE}:${BUILD_NUMBER} & :latest"
                 echo "🔗 https://hub.docker.com/r/${DOCKER_IMAGE}"
             }
         }
@@ -85,14 +102,20 @@ pipeline {
                 echo '=========================================='
                 echo 'Stage 6: Deploying to Kubernetes...'
                 echo '=========================================='
-                echo '[Kubernetes] Applying manifests...'
-                echo 'deployment.apps/projet-s3 configured'
-                echo 'service/projet-s3-service unchanged'
-                echo 'ingress.networking.k8s.io/projet-s3-ingress unchanged'
-                echo '[Kubernetes] Waiting for rollout...'
-                echo 'deployment "projet-s3" successfully rolled out'
-                echo 'Pods status: 2/2 Running'
-                echo 'Services and Ingress available.'
+                script {
+                    sh '''
+                        echo "Applying Kubernetes manifests..."
+                        kubectl apply -f k8s/deployment.yaml
+                        kubectl apply -f k8s/service.yaml
+                        kubectl apply -f k8s/ingress.yaml
+
+                        echo "Waiting for rollout..."
+                        kubectl rollout status deploy/projet-s3 -n ${KUBE_NAMESPACE}
+
+                        echo "Current cluster state:"
+                        kubectl get all -n ${KUBE_NAMESPACE} -o wide
+                    '''
+                }
             }
         }
 
@@ -101,29 +124,42 @@ pipeline {
                 echo '=========================================='
                 echo 'Stage 7: Installing Prometheus & Grafana...'
                 echo '=========================================='
-                echo '[Helm] Checking release monitoring...'
-                echo '[Helm] kube-prometheus-stack already installed and up-to-date.'
-                echo '[Helm] Release monitoring status: deployed'
-                echo 'Prometheus and Grafana running successfully in namespace monitoring.'
+                script {
+                    sh '''
+                        if ! helm status monitoring -n monitoring >/dev/null 2>&1; then
+                            echo "Installing kube-prometheus-stack via Helm..."
+                            helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+                            helm repo update
+                            helm install monitoring prometheus-community/kube-prometheus-stack \
+                                --namespace monitoring --create-namespace
+                        else
+                            echo "Monitoring stack already installed — skipping"
+                        fi
+                    '''
+                }
             }
         }
 
         stage('🩺 Cluster Health Check') {
             steps {
                 echo '=========================================='
-                echo 'Stage 8: Checking cluster health...'
+                echo 'Stage 8: Checking cluster and monitoring health...'
                 echo '=========================================='
-                echo 'NAMESPACE     NAME                                     READY   STATUS    AGE'
-                echo 'default       pod/projet-s3-7b89d4c8d9-mfwx2          1/1     Running   4m'
-                echo 'default       pod/projet-s3-7b89d4c8d9-s7ld9          1/1     Running   4m'
-                echo 'monitoring    pod/monitoring-grafana-c4d88bc5f-wtq9x   1/1     Running   8m'
-                echo 'monitoring    pod/monitoring-prometheus-0              2/2     Running   8m'
-                echo '------------------------------------------'
-                echo '✅ Cluster status: All pods healthy.'
+                script {
+                    sh '''
+                        echo "Namespace: ${KUBE_NAMESPACE}"
+                        echo "--- Default Namespace ---"
+                        kubectl get pods -o wide -n ${KUBE_NAMESPACE}
+                        echo "--- Monitoring Namespace ---"
+                        kubectl get pods -n monitoring
+                        echo "--- Services ---"
+                        kubectl get svc -A
+                    '''
+                }
             }
         }
     }
-
+    
     post {
         always {
             echo '=========================================='
@@ -131,7 +167,7 @@ pipeline {
             echo '=========================================='
             echo "Build Number: ${BUILD_NUMBER}"
             echo "Build Status: ${currentBuild.result ?: 'SUCCESS'}"
-            echo "Duration: 2 min 15 sec"
+            echo "Duration: ${currentBuild.durationString}"
         }
         
         success {
@@ -139,12 +175,20 @@ pipeline {
             echo ''
             echo '📦 Artifacts:'
             echo "   - WAR file: target/Projet_S3.war"
-            echo "   - Docker Image: ${DOCKER_IMAGE}:12"
+            echo "   - Docker Image: ${DOCKER_IMAGE}:${BUILD_NUMBER}"
             echo "   - Docker Image: ${DOCKER_IMAGE}:latest"
             echo ''
             echo "🔗 Docker Hub: https://hub.docker.com/r/${DOCKER_IMAGE}"
-            echo "🔗 Application URL: http://projet-s3.local/"
-            echo "🔗 Grafana: http://localhost:3000/"
+        }
+        
+        failure {
+            echo '❌❌❌ Pipeline failed! ❌❌❌'
+            echo 'Check the logs above for errors.'
+        }
+        
+        cleanup {
+            echo '🧹 Cleaning up workspace...'
+            // cleanWs()
         }
     }
 }
