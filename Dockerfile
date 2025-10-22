@@ -1,35 +1,25 @@
-# Stage 1: Build
-FROM maven:3.9-eclipse-temurin-20 AS build
+# Stage 1 — Build (Maven+JDK17)
+FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
 
+# Préparer le cache des dépendances
 COPY pom.xml .
+RUN --mount=type=cache,target=/root/.m2 mvn -B -q -e -DskipTests dependency:go-offline
+
+# Copier le code et packager
 COPY src ./src
+ARG WAR_NAME=Projet_S3.war
+RUN --mount=type=cache,target=/root/.m2 mvn -B clean package -DskipTests \
+ && test -f "target/${WAR_NAME}" || (echo "WAR introuvable (target/${WAR_NAME})" && ls -lah target && false)
 
-RUN mvn clean package -DskipTests
-
-# Stage 2: Runtime avec Tomcat
+# Stage 2 — Runtime (Tomcat 10 + JDK17)
 FROM tomcat:10.1-jdk17
-
-# Supprimer les apps par défaut
 RUN rm -rf /usr/local/tomcat/webapps/*
+ARG WAR_NAME=Projet_S3.war
+COPY --from=build /app/target/${WAR_NAME} /usr/local/tomcat/webapps/ROOT.war
 
-# Copier le WAR
-COPY --from=build /app/target/Projet_S3.war /usr/local/tomcat/webapps/ROOT.war
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:8080/ >/dev/null 2>&1 || exit 1
 
-# Exposer le port
 EXPOSE 8080
-
-# Lancer Tomcat
 CMD ["catalina.sh", "run"]
-```
-
-### Étape 2 : Créer .dockerignore
-```
-target/
-.git/
-.gitignore
-.idea/
-*.iml
-README.md
-Jenkinsfile
-k8s/
