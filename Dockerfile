@@ -1,18 +1,16 @@
-# Stage 1 — Build (Maven+JDK17)
+# syntax=docker/dockerfile:1.6
+
+# ===== Stage 1 — Build =====
 FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /app
 
-# Préparer le cache des dépendances
-COPY pom.xml .
-RUN --mount=type=cache,target=/root/.m2 mvn -B -q -e -DskipTests dependency:go-offline
+# Copie l'ensemble du projet (plus simple/fiable que go-offline)
+COPY . .
 
-# Copier le code et packager
-COPY src ./src
-ARG WAR_NAME=Projet_S3.war
-RUN --mount=type=cache,target=/root/.m2 mvn -B clean package -DskipTests \
- && test -f "target/${WAR_NAME}" || (echo "WAR introuvable (target/${WAR_NAME})" && ls -lah target && false)
+# Compile et package (WAR attendu dans target/)
+RUN mvn -B clean package -DskipTests
 
-# Stage 2 — Runtime (Tomcat 10 + JDK17)
+# ===== Stage 2 — Runtime (Tomcat 10 + JDK17) =====
 FROM tomcat:10.1-jdk17
 RUN rm -rf /usr/local/tomcat/webapps/*
 ARG WAR_NAME=Projet_S3.war
