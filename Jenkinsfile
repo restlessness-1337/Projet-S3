@@ -88,13 +88,15 @@ pipeline {
                 echo '=========================================='
                 echo 'Stage 5: Running SonarQube analysis...'
                 echo '=========================================='
-                
+        
                 script {
                     withSonarQubeEnv('SonarQube-Server') {
                         sh '''
                             mvn sonar:sonar \
                             -Dsonar.projectKey=Projet-S3 \
                             -Dsonar.projectName="Projet S3 - Employee Management" \
+                            -Dsonar.host.url=http://host.docker.internal:9000 \
+                            -Dsonar.login=sqp_198e4c1995ee4aba8e0b1daf13b37a25b6db38db \
                             -Dsonar.java.binaries=target/classes
                         '''
                     }
