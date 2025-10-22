@@ -8,6 +8,7 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'restlessness/projet-s3'
         DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
+        KUBE_NAMESPACE = 'default'
     }
     
     stages {
@@ -46,13 +47,12 @@ pipeline {
                 echo '=========================================='
                 echo 'Stage 3: Running unit tests...'
                 echo '=========================================='
-                
                 sh 'mvn test || true'
             }
             post {
                 always {
                     junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
-                    echo "Test results published!"
+                    echo "🧾 Test results published!"
                 }
             }
         }
@@ -73,7 +73,7 @@ pipeline {
             post {
                 success {
                     archiveArtifacts artifacts: 'target/*.war', fingerprint: true
-                    echo "✅ Artifact archived successfully!"
+                    echo "📦 Artifact archived successfully!"
                 }
             }
         }
@@ -85,7 +85,6 @@ pipeline {
                 echo '=========================================='
                 
                 script {
-                    // Build et push en une seule étape, avec les credentials DockerHub
                     docker.withRegistry('https://registry-1.docker.io/', 'dockerhub-credentials') {
                         def app = docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}")
                         app.push()
@@ -95,6 +94,68 @@ pipeline {
                 
                 echo "✅ Docker image pushed: ${DOCKER_IMAGE}:${BUILD_NUMBER} & :latest"
                 echo "🔗 https://hub.docker.com/r/${DOCKER_IMAGE}"
+            }
+        }
+
+        stage('🚀 Deploy to Kubernetes') {
+            steps {
+                echo '=========================================='
+                echo 'Stage 6: Deploying to Kubernetes...'
+                echo '=========================================='
+                script {
+                    sh '''
+                        echo "Applying Kubernetes manifests..."
+                        kubectl apply -f k8s/deployment.yaml
+                        kubectl apply -f k8s/service.yaml
+                        kubectl apply -f k8s/ingress.yaml
+
+                        echo "Waiting for rollout..."
+                        kubectl rollout status deploy/projet-s3 -n ${KUBE_NAMESPACE}
+
+                        echo "Current cluster state:"
+                        kubectl get all -n ${KUBE_NAMESPACE} -o wide
+                    '''
+                }
+            }
+        }
+
+        stage('📊 Deploy Monitoring (Prometheus & Grafana)') {
+            steps {
+                echo '=========================================='
+                echo 'Stage 7: Installing Prometheus & Grafana...'
+                echo '=========================================='
+                script {
+                    sh '''
+                        if ! helm status monitoring -n monitoring >/dev/null 2>&1; then
+                            echo "Installing kube-prometheus-stack via Helm..."
+                            helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+                            helm repo update
+                            helm install monitoring prometheus-community/kube-prometheus-stack \
+                                --namespace monitoring --create-namespace
+                        else
+                            echo "Monitoring stack already installed — skipping"
+                        fi
+                    '''
+                }
+            }
+        }
+
+        stage('🩺 Cluster Health Check') {
+            steps {
+                echo '=========================================='
+                echo 'Stage 8: Checking cluster and monitoring health...'
+                echo '=========================================='
+                script {
+                    sh '''
+                        echo "Namespace: ${KUBE_NAMESPACE}"
+                        echo "--- Default Namespace ---"
+                        kubectl get pods -o wide -n ${KUBE_NAMESPACE}
+                        echo "--- Monitoring Namespace ---"
+                        kubectl get pods -n monitoring
+                        echo "--- Services ---"
+                        kubectl get svc -A
+                    '''
+                }
             }
         }
     }
@@ -126,8 +187,8 @@ pipeline {
         }
         
         cleanup {
-            echo 'Cleaning up workspace...'
-            // cleanWs() // décommente si tu veux nettoyer après chaque build
+            echo '🧹 Cleaning up workspace...'
+            // cleanWs()
         }
     }
 }
