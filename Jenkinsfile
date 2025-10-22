@@ -6,10 +6,8 @@ pipeline {
     }
     
     environment {
-        DOCKER_IMAGE = 'restlessness/employee-app'
+        DOCKER_IMAGE = 'restlessness/projet-s3'
         DOCKER_CREDENTIALS = credentials('dockerhub-credentials')
-        K8S_NAMESPACE = 'employee-app'
-        BUILD_VERSION = "${BUILD_NUMBER}"
     }
     
     stages {
@@ -21,7 +19,7 @@ pipeline {
                 checkout scm
                 
                 script {
-                    def gitCommit = bat(returnStdout: true, script: '@git rev-parse HEAD').trim()
+                    def gitCommit = sh(returnStdout: true, script: 'git rev-parse HEAD').trim()
                     echo "Git Commit: ${gitCommit}"
                 }
             }
@@ -33,7 +31,7 @@ pipeline {
                 echo 'Stage 2: Compiling the application...'
                 echo '=========================================='
                 
-                bat '''
+                sh '''
                     echo "Maven Version:"
                     mvn --version
                     
@@ -49,13 +47,11 @@ pipeline {
                 echo 'Stage 3: Running unit tests...'
                 echo '=========================================='
                 
-                bat 'mvn test'
+                sh 'mvn test'
             }
             post {
                 always {
-                    // Publier les résultats des tests
                     junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
-                    
                     echo "Test results published!"
                 }
                 success {
@@ -73,16 +69,15 @@ pipeline {
                 echo 'Stage 4: Packaging the application...'
                 echo '=========================================='
                 
-                bat 'mvn package -DskipTests'
+                sh 'mvn package -DskipTests'
                 
                 script {
-                    def jarFile = bat(returnStdout: true, script: '@dir /b target\\*.jar').trim()
-                    echo "Generated JAR: ${jarFile}"
+                    sh 'ls -la target/*.war'
                 }
             }
             post {
                 success {
-                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                    archiveArtifacts artifacts: 'target/*.war', fingerprint: true
                     echo "✅ Artifact archived successfully!"
                 }
             }
@@ -96,10 +91,10 @@ pipeline {
                 
                 script {
                     withSonarQubeEnv('SonarQube-Server') {
-                        bat '''
-                            mvn sonar:sonar ^
-                            -Dsonar.projectKey=employee-management-app ^
-                            -Dsonar.projectName="Employee Management Application" ^
+                        sh '''
+                            mvn sonar:sonar \
+                            -Dsonar.projectKey=Projet-S3 \
+                            -Dsonar.projectName="Projet S3 - Employee Management" \
                             -Dsonar.java.binaries=target/classes
                         '''
                     }
@@ -133,10 +128,10 @@ pipeline {
                 echo '=========================================='
                 
                 script {
-                    bat """
-                        docker build -t ${DOCKER_IMAGE}:${BUILD_VERSION} .
+                    sh """
+                        docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} .
                         docker build -t ${DOCKER_IMAGE}:latest .
-                        docker images | findstr ${DOCKER_IMAGE}
+                        docker images | grep projet-s3
                     """
                 }
             }
@@ -149,9 +144,9 @@ pipeline {
                 echo '=========================================='
                 
                 script {
-                    bat """
+                    sh """
                         echo ${DOCKER_CREDENTIALS_PSW} | docker login -u ${DOCKER_CREDENTIALS_USR} --password-stdin
-                        docker push ${DOCKER_IMAGE}:${BUILD_VERSION}
+                        docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}
                         docker push ${DOCKER_IMAGE}:latest
                         echo "✅ Images pushed successfully!"
                     """
@@ -166,7 +161,7 @@ pipeline {
                 echo '=========================================='
                 
                 script {
-                    bat """
+                    sh '''
                         kubectl apply -f k8s/namespace.yaml
                         kubectl apply -f k8s/configmap.yaml
                         kubectl apply -f k8s/secret.yaml
@@ -175,11 +170,11 @@ pipeline {
                         kubectl apply -f k8s/ingress.yaml
                         
                         echo "Waiting for deployment to complete..."
-                        kubectl rollout status deployment/employee-app-deployment -n ${K8S_NAMESPACE} --timeout=5m
+                        kubectl rollout status deployment/projet-s3-deployment -n projet-s3 --timeout=5m
                         
                         echo "Getting deployment status..."
-                        kubectl get all -n ${K8S_NAMESPACE}
-                    """
+                        kubectl get all -n projet-s3
+                    '''
                 }
             }
             post {
@@ -205,8 +200,8 @@ pipeline {
         
         success {
             echo '✅✅✅ Pipeline executed successfully! ✅✅✅'
-            echo "Docker Image: ${DOCKER_IMAGE}:${BUILD_VERSION}"
-            echo "Deployment: employee-app-deployment in namespace ${K8S_NAMESPACE}"
+            echo "Docker Image: ${DOCKER_IMAGE}:${BUILD_NUMBER}"
+            echo "Deployment: projet-s3-deployment in namespace projet-s3"
         }
         
         failure {
@@ -215,9 +210,8 @@ pipeline {
         }
         
         cleanup {
-            // Nettoyage optionnel
             echo 'Cleaning up workspace...'
-            // cleanWs() // Décommenter si vous voulez nettoyer le workspace
+            // cleanWs()
         }
     }
 }
